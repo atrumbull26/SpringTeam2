@@ -1,30 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Feb  6 13:51:38 2024
+Created on Fri Feb  9 08:33:24 2024
 
 @author: atrum
 """
 
 import numpy as np
-import mysql.connector as mySQL
 
-mysql_user_name = 'root'
-mysql_password = 'MySQL'
-mysql_ip = '34.145.197.191'
-mysql_db = 'cap_bud'
-
-cnx = mySQL.connect(user=mysql_user_name, passwd=mysql_password,
-                    host=mysql_ip, db=mysql_db)
-cursor = cnx.cursor()
-cursor.execute('SELECT * FROM data')
-rows = cursor.fetchall()
-data = []
-
-for row in rows:
-    data.append([row[0], row[1], row[1]*(1 + row[2])])
-cursor.close()
-cnx.close()
-
+#def read_data(fname_A, fname_c):
+    #A = np.loadtxt(fname_A)
+    #b = 30
+    # = np.loadtxt(fname_c)
+    #return A,b,c
     
 def init(n, m, perc):
     ''' More intuitive approach '''
@@ -45,12 +32,22 @@ def feasible(pop,c,budget):
             pop[i,idx] = 0
 
 def fitness(pop,A):
-    return pop@A 
+    return pop@A #returns number of autoplants are served
 
-def select(pop, fit):
+def select(pop, fit, method = 'rank linear'):
     ''' Compute probability distribution for choosing parents '''
     #higher the fitness, the higher probability we want to select them as parents
-    prob = fit/sum(fit) #fit is a numpy array of fitness for each pop member  -> prob is array for all
+    if method == 'proportional':
+        prob = fit/sum(fit) #fit is a numpy array of fitness for each pop member-> prob is array for all
+    elif method == 'rank linear':
+        r = np.zeros((n,))
+        r[np.argsort(fit)] = np.arange(fit.shape[0])
+        prob = (1 + r)/sum(1 + r)
+    elif method == 'rank nonlinear':
+        q = 0.7
+        r = np.zeros((n,))
+        r[np.argsort(fit)] = np.arange(fit.shape[0])
+        prob = (q**(1 + r))/sum(q**(1 + r))
     parents = np.random.choice(np.arange(pop.shape[0]), size=(pop.shape[0],2), p = prob)
                 #random.choice lets use choose between a subset (vector from 0 to max pop index)
                 #we want to keep pop count constant but we need 2 parents 
@@ -82,28 +79,46 @@ def report(i, best_fit, fit):
     print(f'Generation {i}: Best fit: {best_fit}; Max fit gen:{fit.max()}; Avg fit gen: {fit.mean()}')
     
 ''' Input data '''
+import mysql.connector as mySQL
+
+mysql_user_name = 'root'
+mysql_password = 'MySQL'
+mysql_ip = '34.145.197.191'
+mysql_db = 'cap_bud'
+
+cnx = mySQL.connect(user=mysql_user_name, passwd=mysql_password,
+                    host=mysql_ip, db=mysql_db)
+cursor = cnx.cursor()
+cursor.execute('SELECT * FROM data')
+rows = cursor.fetchall()
+data = []
+
+for row in rows:
+    data.append([row[1], row[1]*(1 + row[2])])
+cursor.close()
+cnx.close()
+
+A = np.array([roi for _, roi in data])
+c = np.array([cost for cost, _ in data])
 budget = 500000
-A = np.array([inv for inv_id, inv, val in data])
-c = np.array([val for inv_id, inv, val in data])
 
-
-
-num_loc = len(data) #number of rows
+#A,budget,c = read_data('A.txt', 'c.txt')
+num_loc = A.shape[0] #number of rows
 #num_dest = A.shape[1] #number of cols
 
 ''' GA parameters '''
-n = 40 # population size
+n = 500 # population size
 num_gen = 100
 init_perc = 0.05 # expected percentage of possible locations 
                  # selected in initial candidate solutions
 mutate_perc = 0.001
+prob_method = 'rank nonlinear'
 
 ''' Initialize population '''
 pop = init(n, num_loc, init_perc)
 feasible(pop,c,budget) # note that function modifies population directly
 fit = fitness(pop,A)
 best_fit, best_soln = stat(pop, fit, 0, np.zeros(num_loc))
-
 plot_maxfit = np.zeros(num_gen)
 plot_avgfit = np.zeros(num_gen)
 plot_bestfit = np.zeros(num_gen)
@@ -111,7 +126,7 @@ plot_bestfit = np.zeros(num_gen)
 ''' Evolution '''
 for i in range(num_gen):
     report(i, best_fit, fit) #best_fit is number of facilities served, increases over time with algorithm 
-    parents = select(pop, fit)
+    parents = select(pop, fit, method= prob_method) #proportional, rank linear, rank nonlinear
     crossover(parents,pop) # replace population with offspring
     mutate(pop, mutate_perc)
     feasible(pop,c,budget)
@@ -122,22 +137,20 @@ for i in range(num_gen):
     plot_bestfit[i] = best_fit
     
     
-import matplotlib.pyplot as plt
-
-
-# Generate sample data
 x = np.arange(0, num_gen, 1)
+
+import matplotlib.pyplot as plt
 
 plt.plot(x, plot_bestfit, label='Best Fit', color='blue')
 plt.plot(x, plot_avgfit, label='Avg Fit', color='red')
 plt.plot(x, plot_maxfit, label='Max Fit', color='green')
 
 # Customize the plot
-plt.title(f'Best Fit with {n} Generations: {best_fit}')
+plt.title(f'Best Fit with {n} Generations: {best_fit} - Sort Method: {prob_method}')
 plt.xlabel('Generation')
 plt.ylabel('Investment Portfolio')
 plt.legend()
 
 # Display the plot
 plt.show()
-
+    
